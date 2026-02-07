@@ -1,0 +1,6 @@
+.DS_Store
+.venv
+.env
+DerivedData
+__pycache__/
+*.pyc
