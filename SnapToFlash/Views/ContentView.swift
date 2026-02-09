@@ -31,12 +31,30 @@ struct ContentView: View {
             Text("1) Capture or import annotated pages")
                 .font(.headline)
 
+            #if DEBUG
+            Button {
+                model.analyzePages() // placeholder to keep button style consistent
+            } label: {
+                EmptyView()
+            }.hidden() // keeps alignment if we add more debug UI later
+            #endif
+
             PhotosPicker(selection: $pickerItems, maxSelectionCount: 10, matching: .images) {
                 Label("Import photos", systemImage: "photo.on.rectangle")
             }
             .onChange(of: pickerItems) { newItems in
                 model.addPhotos(newItems)
             }
+
+            #if DEBUG
+            Button {
+                // Force reload of bundled samples in case they weren't found at init.
+                model.performSampleReload()
+            } label: {
+                Label("Load bundled sample pages", systemImage: "tray.and.arrow.down.fill")
+            }
+            .buttonStyle(.bordered)
+            #endif
 
             if model.pages.isNotEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -97,7 +115,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Warnings")
                         .font(.subheadline.bold())
-                    ForEach(model.warnings, id: \.self) { warning in
+                    ForEach(Array(model.warnings.enumerated()), id: \.offset) { _, warning in
                         Label(warning, systemImage: "exclamationmark.circle")
                             .font(.footnote)
                     }
@@ -112,11 +130,16 @@ struct ContentView: View {
                 .font(.headline)
 
             if model.notes.isEmpty {
-                Text("Cards will appear here after analysis.")
-                    .foregroundColor(.secondary)
+                if model.pendingNotes.isEmpty {
+                    Text("Cards will appear here after analysis.")
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Review pending cards below. Only approved cards are sent to Anki.")
+                        .foregroundColor(.secondary)
+                }
             } else {
-                ForEach(model.notes) { note in
-                    CardRow(note: note)
+                ForEach(Array(model.notes.enumerated()), id: \.element.id) { index, note in
+                    CardRow(note: note, cardIndex: index + 1, showValidation: false, onApprove: {}, onReject: {})
                 }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -139,6 +162,25 @@ struct ContentView: View {
                     }
                 }
             }
+
+            if model.pendingNotes.isNotEmpty {
+                Divider().padding(.vertical, 8)
+                Text("Pending validation")
+                    .font(.subheadline.bold())
+                ForEach(Array(model.pendingNotes.enumerated()), id: \.element.id) { index, note in
+                    CardRow(note: note, cardIndex: index + 1, showValidation: true) {
+                        model.validate(note: note)
+                    } onReject: {
+                        model.reject(note: note)
+                    }
+                }
+                HStack {
+                    Button("Accept all pending") { model.validateAllPending() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Clear pending") { model.pendingNotes.removeAll() }
+                        .buttonStyle(.bordered)
+                }
+            }
         }
     }
 
@@ -156,27 +198,88 @@ struct ContentView: View {
 
 private struct CardRow: View {
     let note: AnkiNote
+    let cardIndex: Int
+    var showValidation: Bool
+    var onApprove: () -> Void
+    var onReject: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(note.expressionOrWord)
-                    .font(.title3.bold())
-                if let reading = note.reading, !reading.isEmpty {
-                    Text("[\(reading)]")
-                        .foregroundColor(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Card \(cardIndex)")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(note.expressionOrWord)
+                        .font(.title3.bold())
+                    if let reading = note.reading, !reading.isEmpty {
+                        Text(reading)
+                            .foregroundColor(.secondary)
+                    }
                 }
                 Spacer()
-                if note.needsReview { Text("Needs review").font(.caption).foregroundColor(.orange) }
+                if note.needsReview {
+                    Text("Needs review")
+                        .font(.caption2)
+                        .padding(6)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.15)))
+                        .foregroundColor(.orange)
+                }
             }
+
+            if let book = note.bookMatch, !book.isEmpty {
+                Label(book, systemImage: "book")
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            if let ai = note.aiTranslation, let hand = note.handTranslation, ai != hand, !ai.isEmpty, !hand.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Handwritten translation: \(hand)")
+                    Text("AI translation: \(ai)")
+                        .foregroundColor(.secondary)
+                }
+                .font(.footnote)
+            }
+
             Text(note.meaning)
+                .font(.body)
+
             if let example = note.example, !example.isEmpty {
                 Text(example)
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
-            ProgressView(value: note.confidence)
-                .tint(note.needsReview ? .orange : .green)
+
+            if let source = note.sourcePage {
+                Text("Image: \(source)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            HStack {
+                if let conf = note.confMatch {
+                    ProgressView(value: conf)
+                        .tint(note.needsReview ? .orange : .green)
+                        .frame(maxWidth: 120)
+                }
+                if let ocr = note.confOcr {
+                    Text(String(format: "OCR %.0f%%", ocr * 100))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if showValidation {
+                HStack {
+                    Button("Approve") { onApprove() }
+                        .buttonStyle(.borderedProminent)
+                    Button("Reject") { onReject() }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                }
+            }
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))

@@ -14,7 +14,7 @@ SwiftUI iOS app that turns annotated textbook photos into Anki flashcards. A Fas
    cp .env.example .env   # fill in OPENAI_API_KEY
    bash scripts/run_backend.sh
    ```
-2) Ensure `SnapToFlash/Info.plist` has `BackendBaseURL` = `http://localhost:8787`.
+2) Ensure `SnapToFlash/Info.plist` has `BackendBaseURL` = `http://127.0.0.1:8787`.
 3) Run the app in the simulator; “Generate flashcards” should hit the local server.
 
 ## Deploy backend to Fly.io (summary)

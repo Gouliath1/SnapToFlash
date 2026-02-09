@@ -6,5 +6,5 @@ struct PageAnalysisResponse: Codable {
     var needsReview: Bool
     var warnings: [String]
     var annotations: [AnnotationMark]
-    var ankiNotes: [AnkiNote]
+    var ankiNotes: [RawNote]
 }

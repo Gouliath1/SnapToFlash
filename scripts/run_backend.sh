@@ -5,13 +5,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Load .env if present
-if [[ -f "$ROOT/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source "$ROOT/.env"
-  set +a
-fi
+# Load .env if present (first from app root, then from parent)
+for ENV_PATH in "$ROOT/.env" "$(dirname "$ROOT")/.env"; do
+  if [[ -f "$ENV_PATH" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$ENV_PATH"
+    set +a
+    break
+  fi
+done
+
+# Default model if not provided
+: "${OPENAI_MODEL:=gpt-4o-mini}"
 
 PORT="${PORT:-8787}"
 

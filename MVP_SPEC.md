@@ -121,6 +121,64 @@ Example JSON:
 }
 ```
 
+## Vision prompt (notebook + highlighted book pages)
+Use this prompt verbatim for the multimodal call that extracts flashcards from mixed notebook + textbook photos and prepares them for user validation.
+
+```
+You are an assistant that extracts study flashcards from photos and prepares them for user validation before Anki export.
+
+Inputs:
+- One or more photos that may show: (a) a printed book page with highlights/underlines, (b) my handwritten notebook with vocab lines in this pattern: kanji (if any) → hiragana → translation/meaning. Phrases may also appear with translations.
+Goal: propose flashcards that map what I wrote to the closest corresponding word/phrase on the book page. If no translation exists, use the highlighted book text itself.
+
+Rules:
+1) OCR:
+   - Transcribe all handwritten lines; keep reading order (top→bottom, left→right).
+2) Identify vocab units:
+   - Notebook: each contiguous line-set = one entry: [kanji (optional), hiragana, translation/comment]. If kanji missing, use hiragana as headword.
+   - Book: find highlighted/underlined text; each highlight is a separate candidate.
+3) Matching:
+   - For each notebook entry, search book text for the best match (ignore inflection; allow partial). If none, leave book_match empty.
+4) Translation cross-check:
+   - If a notebook translation/comment exists, generate the model’s own translation.
+   - If model translation differs materially from the handwritten one, include both and mark needs_review=true; otherwise keep only the handwritten translation.
+5) Card building:
+   - Prefer notebook translation when present; if none and a highlighted book phrase exists, use the highlight as front and leave back empty.
+   - Preserve phrases; do not split into single words.
+   - Keep script distinctions: store kanji and kana separately when both exist.
+6) Quality:
+   - Include confidence 0–1 for OCR and for the match.
+   - Do not invent translations; leave back empty if unknown.
+7) Output only JSON.
+
+Output JSON array:
+[
+  {
+    "front": "kanji or highlighted word/phrase (or hiragana if no kanji)",
+    "back": "translation/meaning (may be empty)",
+    "hiragana": "reading if available",
+    "kanji": "kanji form if available, else empty",
+    "source": "notebook|book",
+    "book_match": "matched book phrase or ''",
+    "hand_translation": "handwritten translation/comment or ''",
+    "ai_translation": "model translation or ''",
+    "needs_review": true/false,   // true when hand vs AI differ meaningfully
+    "conf_ocr": 0.0-1.0,
+    "conf_match": 0.0-1.0,
+    "notes": "ambiguity, alternatives, or why needs_review=true"
+  }
+]
+
+Post-processing expectations (handled downstream):
+- Show each card for user validation; allow bulk accept. Only validated cards are exported to Anki.
+- If needs_review=false and no differences, no extra confirmation is required beyond the normal validation step.
+- If multiple photos are given, combine results and deduplicate exact duplicates.
+```
+
+**Additional requirements for the flow**
+- During review, if the handwritten translation/comment and the model translation differ, surface both and let the user choose; otherwise skip the diff step to keep flow fast.
+- The Anki deck is created only after user validation (per-card or bulk accept). Unapproved cards are excluded from the export.
+
 ## Image preprocessing recommendations
 - Resize to max long edge 1600–2048 px.
 - Compress to JPEG quality ~0.7–0.85.

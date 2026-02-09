@@ -51,19 +51,43 @@ struct BackendClient {
             let payload = try decoder.decode(PageAnalysisResponse.self, from: data)
             return payload
         } catch {
-            throw BackendError.decodingFailed(error)
+            let bodyPreview = String(data: data, encoding: .utf8)?.prefix(600) ?? "<non-utf8>"
+            throw BackendError.decodingFailed(error, bodyPreview: String(bodyPreview))
         }
     }
 
     enum BackendError: Error, LocalizedError {
         case badStatus
-        case decodingFailed(Error)
+        case decodingFailed(Error, bodyPreview: String)
 
         var errorDescription: String? {
             switch self {
             case .badStatus: return "Server returned an error status."
-            case .decodingFailed(let err): return "Unable to decode response: \(err.localizedDescription)"
+            case .decodingFailed(let err, let bodyPreview):
+                return "Unable to decode response: \(describeDecodingError(err)). Body: \(bodyPreview)"
             }
+        }
+
+        private func describeDecodingError(_ error: Error) -> String {
+            if let decodingError = error as? DecodingError {
+                switch decodingError {
+                case .typeMismatch(let type, let context):
+                    return "Type mismatch for \(type): \(context.debugDescription) at \(codingPath(context.codingPath))"
+                case .valueNotFound(let type, let context):
+                    return "Missing value for \(type): \(context.debugDescription) at \(codingPath(context.codingPath))"
+                case .keyNotFound(let key, let context):
+                    return "Missing key '\(key.stringValue)': \(context.debugDescription) at \(codingPath(context.codingPath))"
+                case .dataCorrupted(let context):
+                    return "Data corrupted: \(context.debugDescription) at \(codingPath(context.codingPath))"
+                @unknown default:
+                    return error.localizedDescription
+                }
+            }
+            return error.localizedDescription
+        }
+
+        private func codingPath(_ path: [CodingKey]) -> String {
+            path.map(\.stringValue).joined(separator: ".")
         }
     }
 }
@@ -71,13 +95,13 @@ struct BackendClient {
 // MARK: - Helpers
 
 extension BackendClient {
-    /// Reads BackendBaseURL from Info.plist; falls back to localhost.
+    /// Reads BackendBaseURL from Info.plist; falls back to 127.0.0.1.
     static func defaultBaseURL() -> URL {
         if let str = Bundle.main.object(forInfoDictionaryKey: "BackendBaseURL") as? String,
            let url = URL(string: str) {
             return url
         }
-        return URL(string: "http://localhost:8787")!
+        return URL(string: "http://127.0.0.1:8787")!
     }
 }
 
