@@ -13,6 +13,7 @@ final class AppViewModel: ObservableObject {
     @Published var isAnalyzing = false
     @Published var statusText: String?
     @Published var errorMessage: String?
+    @Published var backendAvailable: Bool = false
     @Published var ankiAvailable: Bool = false
 
     private let backend: BackendClient
@@ -32,6 +33,25 @@ final class AppViewModel: ObservableObject {
 
     func refreshAnkiAvailability() async {
         ankiAvailable = await anki.isAvailable()
+    }
+
+    func refreshBackendAvailability() async {
+        backendAvailable = await backend.isAvailable()
+    }
+
+    func refreshServiceAvailability() async {
+        async let backendStatus = backend.isAvailable()
+        async let ankiStatus = anki.isAvailable()
+        backendAvailable = await backendStatus
+        ankiAvailable = await ankiStatus
+    }
+
+    var backendTargetLabel: String {
+        let host = (backend.baseURL.host ?? "").lowercased()
+        if host == "127.0.0.1" || host == "localhost" {
+            return "Local"
+        }
+        return "Fly"
     }
 
     func addPhotos(_ items: [PhotosPickerItem]) {

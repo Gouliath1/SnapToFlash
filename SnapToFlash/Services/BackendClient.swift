@@ -10,6 +10,20 @@ struct BackendClient {
         self.session = session
     }
 
+    func isAvailable() async -> Bool {
+        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
+        request.httpMethod = "GET"
+        request.timeoutInterval = 3
+
+        do {
+            let (_, response) = try await session.data(for: request)
+            if let http = response as? HTTPURLResponse { return 200..<300 ~= http.statusCode }
+        } catch {
+            return false
+        }
+        return false
+    }
+
     func analyzePage(imageData: Data, pageId: String?) async throws -> PageAnalysisResponse {
         var request = URLRequest(url: baseURL.appendingPathComponent("/analyze-page"))
         request.httpMethod = "POST"
@@ -95,8 +109,20 @@ struct BackendClient {
 // MARK: - Helpers
 
 extension BackendClient {
-    /// Reads BackendBaseURL from Info.plist; falls back to 127.0.0.1.
+    /// Reads BackendBaseURL{Debug|Release} based on build configuration,
+    /// then falls back to BackendBaseURL and finally 127.0.0.1.
     static func defaultBaseURL() -> URL {
+        #if DEBUG
+        let preferredKey = "BackendBaseURLDebug"
+        #else
+        let preferredKey = "BackendBaseURLRelease"
+        #endif
+
+        if let str = Bundle.main.object(forInfoDictionaryKey: preferredKey) as? String,
+           let url = URL(string: str) {
+            return url
+        }
+
         if let str = Bundle.main.object(forInfoDictionaryKey: "BackendBaseURL") as? String,
            let url = URL(string: str) {
             return url

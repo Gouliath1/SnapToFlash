@@ -30,10 +30,20 @@ struct ContentView: View {
                 .padding(.bottom, actionBarHeight)
             }
             .navigationTitle("SnapToFlash")
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { ankiStatus } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        backendStatus
+                        ankiStatus
+                    }
+                }
+            }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             actionBar
+        }
+        .task {
+            await model.refreshServiceAvailability()
         }
         .onChange(of: pickerItems) { newItems in
             model.addPhotos(newItems)
@@ -323,10 +333,21 @@ struct ContentView: View {
             Circle()
                 .fill(model.ankiAvailable ? Color.green : Color.red)
                 .frame(width: 10, height: 10)
-            Text(model.ankiAvailable ? "Anki" : "Anki off")
+            Text("Anki")
                 .font(.footnote)
         }
         .onTapGesture { Task { await model.refreshAnkiAvailability() } }
+    }
+
+    private var backendStatus: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(model.backendAvailable ? Color.green : Color.red)
+                .frame(width: 10, height: 10)
+            Text(model.backendTargetLabel)
+                .font(.footnote)
+        }
+        .onTapGesture { Task { await model.refreshBackendAvailability() } }
     }
 }
 

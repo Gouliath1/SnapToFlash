@@ -4,20 +4,24 @@
 <dict>
 	<key>BackendBaseURL</key>
 	<string>http://127.0.0.1:8787</string>
+	<key>BackendBaseURLDebug</key>
+	<string>http://127.0.0.1:8787</string>
+	<key>BackendBaseURLRelease</key>
+	<string>https://snaptoflash-backend.fly.dev</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>localhost</key>
+			<key>127.0.0.1</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>
 				<key>NSIncludesSubdomains</key>
 				<true/>
 			</dict>
-			<key>127.0.0.1</key>
+			<key>localhost</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>

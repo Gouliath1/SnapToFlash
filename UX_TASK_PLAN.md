@@ -51,3 +51,21 @@ Based on the UX requirements captured in `MVP_SPEC.md` ("UX v2 requirements").
 3. Add editable card fields and "suggest translation" action.
 4. Finalize validation flow wording/interaction for bulk actions.
 5. Apply branding pass (title/subtitle/header visuals), then app icon and app description copy.
+
+## Delivery & Integration Tasks
+
+- [ ] **1) Run app on physical iPhone for testing**
+  - Set up signing/provisioning and install to device.
+  - Verify camera, photo import, and export flows on real hardware.
+
+- [ ] **2) Validate CSV generation end-to-end**
+  - Confirm CSV export action creates expected rows/columns.
+  - Spot-check generated CSV in a spreadsheet and in Anki import preview.
+
+- [ ] **3) Connect and validate Anki integration**
+  - Enable AnkiConnect on desktop and verify connectivity.
+  - Test `Export -> Anki` with success and unavailable/error states.
+
+- [ ] **4) Decide deck save strategy**
+  - Define behavior: create a new deck per source set, append to existing deck, or prompt user each export.
+  - Document default rule and UX for overriding it.
