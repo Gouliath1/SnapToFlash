@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppViewModel
@@ -7,6 +8,14 @@ struct ContentView: View {
     @State private var deckName: String = "SnapToFlash"
     @State private var showCSVShare = false
     @State private var csvString: String = ""
+    @State private var showCameraPicker = false
+    @State private var showLoadOptions = false
+    @State private var showValidationOptions = false
+    @State private var showPhotoLibraryPicker = false
+    @State private var showExportOptions = false
+    @State private var shouldPresentCSVAfterExportSheet = false
+
+    private let actionBarHeight: CGFloat = 120
 
     var body: some View {
         NavigationStack {
@@ -16,13 +25,93 @@ struct ContentView: View {
                     progressSection
                     resultsSection
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
+                .padding(.bottom, actionBarHeight)
             }
             .navigationTitle("SnapToFlash")
             .toolbar { ToolbarItem(placement: .topBarTrailing) { ankiStatus } }
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            actionBar
+        }
+        .onChange(of: pickerItems) { newItems in
+            model.addPhotos(newItems)
+        }
+        .photosPicker(
+            isPresented: $showPhotoLibraryPicker,
+            selection: $pickerItems,
+            maxSelectionCount: 10,
+            matching: .images
+        )
+        .confirmationDialog("Load image(s)", isPresented: $showLoadOptions, titleVisibility: .visible) {
+            Button("Import from Photos") {
+                DispatchQueue.main.async {
+                    showPhotoLibraryPicker = true
+                }
+            }
+#if DEBUG
+            Button("Load bundled samples") {
+                model.performSampleReload()
+            }
+#endif
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button("Take picture") {
+                    DispatchQueue.main.async {
+                        showCameraPicker = true
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Choose image source")
+        }
+        .confirmationDialog("Validate cards", isPresented: $showValidationOptions, titleVisibility: .visible) {
+            Button("Accept all pending (\(model.pendingNotes.count))") {
+                model.validateAllPending()
+            }
+            .disabled(model.pendingNotes.isEmpty)
+
+            Button("Clear pending (\(model.pendingNotes.count))", role: .destructive) {
+                model.pendingNotes.removeAll()
+            }
+            .disabled(model.pendingNotes.isEmpty)
+
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Approve or discard pending cards")
+        }
+        .sheet(
+            isPresented: $showExportOptions,
+            onDismiss: {
+                if shouldPresentCSVAfterExportSheet {
+                    shouldPresentCSVAfterExportSheet = false
+                    showCSVShare = true
+                }
+            }
+        ) {
+            ExportOptionsSheet(
+                ankiEnabled: canAnkiExport,
+                csvEnabled: canExport
+            ) {
+                showExportOptions = false
+                Task { await model.sendToAnki(deckName: deckName) }
+            } onCSV: {
+                csvString = model.exportCSV()
+                shouldPresentCSVAfterExportSheet = true
+                showExportOptions = false
+            }
+        }
         .sheet(isPresented: $showCSVShare) {
             ShareSheet(activityItems: [csvString])
+        }
+        .fullScreenCover(isPresented: $showCameraPicker) {
+            CameraCaptureView { image in
+                model.addCapturedPhoto(image)
+                showCameraPicker = false
+            } onCancel: {
+                showCameraPicker = false
+            }
         }
     }
 
@@ -30,31 +119,6 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("1) Capture or import annotated pages")
                 .font(.headline)
-
-            #if DEBUG
-            Button {
-                model.analyzePages() // placeholder to keep button style consistent
-            } label: {
-                EmptyView()
-            }.hidden() // keeps alignment if we add more debug UI later
-            #endif
-
-            PhotosPicker(selection: $pickerItems, maxSelectionCount: 10, matching: .images) {
-                Label("Import photos", systemImage: "photo.on.rectangle")
-            }
-            .onChange(of: pickerItems) { newItems in
-                model.addPhotos(newItems)
-            }
-
-            #if DEBUG
-            Button {
-                // Force reload of bundled samples in case they weren't found at init.
-                model.performSampleReload()
-            } label: {
-                Label("Load bundled sample pages", systemImage: "tray.and.arrow.down.fill")
-            }
-            .buttonStyle(.bordered)
-            #endif
 
             if model.pages.isNotEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -84,16 +148,17 @@ struct ContentView: View {
                 Text("No photos added yet.")
                     .foregroundColor(.secondary)
             }
-
-            Button {
-                model.analyzePages()
-            } label: {
-                Label("Generate flashcards", systemImage: "sparkles")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(model.isAnalyzing || model.pages.isEmpty)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
+        )
     }
 
     private var progressSection: some View {
@@ -142,23 +207,13 @@ struct ContentView: View {
                     CardRow(note: note, cardIndex: index + 1, showValidation: false, onApprove: {}, onReject: {})
                 }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField("Deck name", text: $deckName)
-                        .textFieldStyle(.roundedBorder)
-
-                    HStack {
-                        Button("Send to Anki") {
-                            Task { await model.sendToAnki(deckName: deckName) }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(model.isAnalyzing || model.notes.isEmpty || model.ankiAvailable == false)
-
-                        Button("Export CSV") {
-                            csvString = model.exportCSV()
-                            showCSVShare = true
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(model.notes.isEmpty)
+                if model.ankiAvailable {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Anki deck name")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextField("Deck name", text: $deckName)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
             }
@@ -174,14 +229,93 @@ struct ContentView: View {
                         model.reject(note: note)
                     }
                 }
-                HStack {
-                    Button("Accept all pending") { model.validateAllPending() }
-                        .buttonStyle(.borderedProminent)
-                    Button("Clear pending") { model.pendingNotes.removeAll() }
-                        .buttonStyle(.bordered)
-                }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14)
+                .fill(Color(.secondarySystemBackground))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(Color(.separator).opacity(0.35), lineWidth: 1)
+        )
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 8) {
+            Button {
+                showLoadOptions = true
+            } label: {
+                ActionBarButtonLabel(
+                    title: "Load",
+                    systemImage: "camera.on.rectangle.fill",
+                    isEnabled: canLoadImages
+                )
+            }
+            .disabled(canLoadImages == false)
+
+            Button {
+                model.analyzePages()
+            } label: {
+                ActionBarButtonLabel(
+                    title: "Gen. Cards",
+                    systemImage: "sparkles",
+                    isEnabled: canGenerate
+                )
+            }
+            .disabled(canGenerate == false)
+
+            Button {
+                showValidationOptions = true
+            } label: {
+                ActionBarButtonLabel(
+                    title: "Validate",
+                    systemImage: "checkmark.circle.fill",
+                    isEnabled: canValidate
+                )
+            }
+            .disabled(canValidate == false)
+
+            Button {
+                showExportOptions = true
+            } label: {
+                ActionBarButtonLabel(
+                    title: "Export",
+                    systemImage: "square.and.arrow.up.fill",
+                    isEnabled: canExport
+                )
+            }
+            .disabled(canExport == false)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    private var canLoadImages: Bool {
+        model.isAnalyzing == false
+    }
+
+    private var canGenerate: Bool {
+        model.isAnalyzing == false && model.pages.isNotEmpty
+    }
+
+    private var canValidate: Bool {
+        model.isAnalyzing == false && model.pendingNotes.isNotEmpty
+    }
+
+    private var canExport: Bool {
+        model.isAnalyzing == false && model.notes.isNotEmpty
+    }
+
+    private var canAnkiExport: Bool {
+        canExport && model.ankiAvailable
     }
 
     private var ankiStatus: some View {
@@ -283,6 +417,117 @@ private struct CardRow: View {
         }
         .padding()
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+    }
+}
+
+private struct ActionBarButtonLabel: View {
+    let title: String
+    let systemImage: String
+    let isEnabled: Bool
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+            Text(title)
+                .font(.caption2)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .foregroundColor(isEnabled ? .accentColor : .gray)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isEnabled ? Color.accentColor.opacity(0.14) : Color.gray.opacity(0.12))
+        )
+    }
+}
+
+private struct CameraCaptureView: UIViewControllerRepresentable {
+    var onCapture: (UIImage) -> Void
+    var onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCapture: onCapture, onCancel: onCancel)
+    }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.delegate = context.coordinator
+        picker.sourceType = .camera
+        picker.allowsEditing = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        private let onCapture: (UIImage) -> Void
+        private let onCancel: () -> Void
+
+        init(onCapture: @escaping (UIImage) -> Void, onCancel: @escaping () -> Void) {
+            self.onCapture = onCapture
+            self.onCancel = onCancel
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onCancel()
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                onCapture(image)
+            } else {
+                onCancel()
+            }
+        }
+    }
+}
+
+private struct ExportOptionsSheet: View {
+    let ankiEnabled: Bool
+    let csvEnabled: Bool
+    var onAnki: () -> Void
+    var onCSV: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Export cards")
+                .font(.headline)
+            Text("Choose export destination")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+
+            Button {
+                onAnki()
+            } label: {
+                Label("Anki", systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(ankiEnabled == false)
+
+            Button {
+                onCSV()
+            } label: {
+                Label("CSV", systemImage: "tablecells.fill")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .disabled(csvEnabled == false)
+
+            Button("Close") {
+                dismiss()
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding()
+        .presentationDetents([.height(240)])
     }
 }
 

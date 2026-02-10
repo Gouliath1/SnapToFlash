@@ -6,7 +6,7 @@
 **Non-goals:**
 - No complex, classical CV pipelines (use GenAI vision-first extraction for MVP).
 - No multi-page document management, account system, or advanced study analytics.
-- No deep editing UI beyond confirm/edit/delete for low-confidence cards.
+- No advanced editor workflow (inline card edits are allowed, but no full rich-text editing UI).
 
 ## User flow (minimal screens and actions)
 1. **Import/Scan**: User takes one or more photos or imports multiple images of Japanese textbook pages with annotations.
@@ -207,6 +207,68 @@ ExpressionOrWord,Reading,Meaning,Example
 - If no annotations detected, show “No marks found” with a retry option.
 - Default to no data retention; cache by image hash only if user consents or in on-device cache.
 - Log only minimal metadata (timestamp, success/failure) in proxy option.
+
+## UX v2 requirements (next iteration)
+These items are approved for the next implementation pass.
+
+1. **Bottom pinned action bar (thumb-friendly flow)**
+   - Keep the primary flow actions always visible and pinned at the bottom.
+   - Button order: `Load image(s)` -> `Generate cards` -> `Validate cards` -> `Send to Anki`.
+   - `Load image(s)` opens a source chooser: import from library, load sample pages, or take picture.
+   - `Validate cards` surfaces bulk validation actions (accept all pending, clear pending).
+   - Use clear icons + short labels and a 1-2 word description per action.
+   - Buttons must visually show disabled state when unavailable for the current step.
+   - Rationale: bottom placement is preferred for one-hand/thumb reach on phones.
+
+2. **Sample pages handling**
+   - Bundled sample pages remain available for test/debug only.
+   - Do not expose sample-loading controls in normal production UX.
+   - If needed, keep sample controls behind debug-only gates.
+
+3. **Image strip + fullscreen inspection**
+   - Show selected/captured images in a horizontal strip above results.
+   - Tapping an image opens fullscreen preview (zoom/pan and dismiss).
+
+4. **Pre-upload compression (required)**
+   - Compress images before sending to backend/LLM.
+   - Keep quality high enough for handwriting/OCR while reducing payload size.
+   - Default target: max long edge 1600-2048 px and JPEG quality about 0.7-0.85.
+
+5. **Compact card layout + image grouping**
+   - Make card rows denser (less vertical whitespace, fewer repeated lines).
+   - Show image name near top of card metadata.
+   - Add a strong visual divider between groups of cards from different images.
+
+6. **Card text editing + re-translation assist**
+   - Card text fields must be editable before final export.
+   - After user edits front/back text, offer an AI-assisted "improve translation" suggestion.
+   - User remains final authority on accepted text.
+
+7. **Pending actions UX review**
+   - Bulk pending actions are accessed from the bottom `Validate cards` action.
+   - Keep behavior explicit: accept all pending vs clear pending.
+   - Continue refining wording if users find the distinction ambiguous.
+
+8. **Branding in header**
+   - App title should be `Snap To Flash` (with spaces).
+   - Add subtitle under/near title.
+   - Improve top branding with a cleaner visual treatment and icon.
+
+9. **App icon**
+   - Create a clearer, recognizable app icon that communicates photo -> flashcard intent.
+   - Provide light/dark-safe contrast and legibility at small sizes.
+
+10. **App description copy**
+   - Create app store/product description copy (short + long variants).
+   - Messaging should highlight: photo capture/import, AI extraction, review, and Anki export.
+
+### UX acceptance checks for v2
+- Core action buttons remain visible at the bottom regardless of list length.
+- User can complete capture/import -> generate -> review -> send without scrolling to find actions.
+- User can open `Load image(s)` and choose import/sample/camera from one place.
+- Every card clearly indicates originating image(s).
+- Card list is visually compact and still readable.
+- Edited cards can request AI translation suggestions before final approval/export.
 
 ## Acceptance criteria (end-to-end)
 - User can go from photo → Anki add in **2–3 taps**.

@@ -40,14 +40,23 @@ final class AppViewModel: ObservableObject {
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let uiImage = UIImage(data: data) else { continue }
                 let name = item.itemIdentifier ?? "page_\(pages.count + 1)"
-                let page = PageInput(image: uiImage, filename: name)
-                pages.append(page)
+                appendPage(image: uiImage, filename: name)
             }
         }
     }
 
+    func addCapturedPhoto(_ image: UIImage) {
+        let filename = "camera_\(Int(Date().timeIntervalSince1970))"
+        appendPage(image: image, filename: filename)
+    }
+
     func removePage(_ page: PageInput) {
         pages.removeAll { $0.id == page.id }
+    }
+
+    private func appendPage(image: UIImage, filename: String) {
+        let page = PageInput(image: image, filename: filename)
+        pages.append(page)
     }
 
     func analyzePages() {
