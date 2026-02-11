@@ -26,9 +26,6 @@ final class AppViewModel: ObservableObject {
     init(backend: BackendClient, anki: AnkiConnectService) {
         self.backend = backend
         self.anki = anki
-#if DEBUG
-        preloadSamplePages()
-#endif
     }
 
     func refreshAnkiAvailability() async {
@@ -241,41 +238,70 @@ extension AppViewModel {
 
     func preloadSamplePages() {
         var all: [URL] = []
+        let fm = FileManager.default
 
-        // Allowed extensions (case-insensitive)
-        let exts = ["jpg", "jpeg", "png", "heic", "heif", "JPG", "JPEG", "PNG", "HEIC", "HEIF"]
+        // Allowed extensions for debug sample pages.
+        let exts = ["jpg", "jpeg", "png", "heic", "heif"]
+        let blockedNamePrefixes = ["appicon", "accentcolor", "contents", "deckify icon"]
+        let blockedPathTokens = [".appiconset", ".colorset"]
 
-        // 1) Common subdirectories including root
-        let searchDirs: [String?] = ["SamplePages", "Resources/SamplePages", nil]
-        all.append(contentsOf: searchDirs.flatMap { dir in
-            exts.flatMap { ext in
-                Bundle.main.urls(forResourcesWithExtension: ext, subdirectory: dir) ?? []
+        func isSampleImageURL(_ url: URL) -> Bool {
+            let ext = url.pathExtension.lowercased()
+            guard exts.contains(ext) else { return false }
+
+            let filename = url.deletingPathExtension().lastPathComponent.lowercased()
+            if blockedNamePrefixes.contains(where: { filename.hasPrefix($0) }) {
+                return false
             }
-        })
 
-        // 2) Fallback: scan bundle recursively for a folder named SamplePages
-        if all.isEmpty, let root = Bundle.main.resourceURL {
-            if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
-                for case let url as URL in enumerator {
-                    if url.lastPathComponent == "SamplePages" {
-                        let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)
-                        let filtered = contents?.filter { exts.contains($0.pathExtension.lowercased()) } ?? []
-                        all.append(contentsOf: filtered)
-                    }
+            let path = url.path.lowercased()
+            if blockedPathTokens.contains(where: { path.contains($0) }) {
+                return false
+            }
+
+            return true
+        }
+
+        func appendImages(from directory: URL) {
+            guard let contents = try? fm.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else { return }
+
+            all.append(contentsOf: contents.filter(isSampleImageURL))
+        }
+
+        if let root = Bundle.main.resourceURL {
+            // 1) Search explicit SamplePages directories first.
+            let explicitDirs = [
+                root.appendingPathComponent("SamplePages", isDirectory: true),
+                root.appendingPathComponent("Resources/SamplePages", isDirectory: true)
+            ]
+            for dir in explicitDirs where fm.fileExists(atPath: dir.path) {
+                appendImages(from: dir)
+            }
+
+            // 2) Fallback to bundle root (synchronized resources may be flattened here).
+            if all.isEmpty {
+                appendImages(from: root)
+            }
+
+            // 3) Last fallback: recursively search directories named SamplePages.
+            if all.isEmpty,
+               let enumerator = fm.enumerator(
+                at: root,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+               ) {
+                for case let url as URL in enumerator where url.lastPathComponent == "SamplePages" {
+                    appendImages(from: url)
                 }
             }
         }
 
-        // 3) Fallback: scan entire bundle for any allowed extension
-        if all.isEmpty, let root = Bundle.main.resourceURL {
-            if let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
-                for case let url as URL in enumerator {
-                    if exts.contains(url.pathExtension) {
-                        all.append(url)
-                    }
-                }
-            }
-        }
+        all = all.filter(isSampleImageURL)
+        all = Array(Set(all.map { $0.path })).map(URL.init(fileURLWithPath:))
 
         print("SamplePages search -> found \(all.count) file(s)")
         if let root = Bundle.main.resourceURL {

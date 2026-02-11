@@ -8,6 +8,10 @@
 	<string>http://127.0.0.1:8787</string>
 	<key>BackendBaseURLRelease</key>
 	<string>https://snaptoflash-backend.fly.dev</string>
+	<key>CFBundleDisplayName</key>
+	<string>Deckify</string>
+	<key>DeckifyBrandIconPath</key>
+	<string>~/Development/SnapToFlash/design/icons/Deckify Icon 2.png</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>
