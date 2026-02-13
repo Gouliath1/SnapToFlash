@@ -4,3 +4,6 @@
 DerivedData
 __pycache__/
 *.pyc
+SnapToFlash/Assets.xcassets/**/*.png
+!SnapToFlash/Assets.xcassets/AppIcon.appiconset/*.png
+design/icons/*.png
