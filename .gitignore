@@ -1,6 +1,7 @@
 .DS_Store
 .venv
 .env
+OpenAI-API-Key.md
 DerivedData
 __pycache__/
 *.pyc
