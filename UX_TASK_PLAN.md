@@ -43,6 +43,7 @@ Based on the UX requirements captured in `MVP_SPEC.md` ("UX v2 requirements").
 - [x] Bottom scroll content padding adjusted so final card is not hidden behind action bar.
 - [x] Per-card source image label and card counters added.
 - [x] Card ordering preserves image order + reading-order best effort.
+- [x] Pull-down gesture on main screen refreshes backend connectivity status (no app restart needed).
 
 ## Next Implementation Order
 
@@ -59,6 +60,7 @@ Based on the UX requirements captured in `MVP_SPEC.md` ("UX v2 requirements").
   - Verify camera, photo import, and export flows on real hardware.
 
 - [ ] **2) Validate CSV generation end-to-end**
+  - CSV export now creates and shares an actual `.csv` file URL.
   - Confirm CSV export action creates expected rows/columns.
   - Spot-check generated CSV in a spreadsheet and in Anki import preview.
 

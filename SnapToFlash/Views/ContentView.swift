@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import PhotosUI
 import UIKit
@@ -8,7 +9,7 @@ struct ContentView: View {
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var deckName: String = "Deckify"
     @State private var showCSVShare = false
-    @State private var csvString: String = ""
+    @State private var csvFileURL: URL?
     @State private var showCameraPicker = false
     @State private var showLoadOptions = false
     @State private var showValidationOptions = false
@@ -38,6 +39,9 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
                     .padding(.bottom, actionBarHeight)
+                }
+                .refreshable {
+                    await model.refreshBackendAvailability()
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -118,13 +122,23 @@ struct ContentView: View {
                 showExportOptions = false
                 Task { await model.sendToAnki(deckName: deckName) }
             } onCSV: {
-                csvString = model.exportCSV()
-                shouldPresentCSVAfterExportSheet = true
+                do {
+                    csvFileURL = try model.exportCSVFileURL(suggestedName: deckName)
+                    shouldPresentCSVAfterExportSheet = true
+                } catch {
+                    model.errorMessage = error.localizedDescription
+                    shouldPresentCSVAfterExportSheet = false
+                }
                 showExportOptions = false
             }
         }
-        .sheet(isPresented: $showCSVShare) {
-            ShareSheet(activityItems: [csvString])
+        .sheet(isPresented: $showCSVShare, onDismiss: cleanupCSVFile) {
+            if let csvFileURL {
+                ShareSheet(activityItems: [csvFileURL])
+            } else {
+                Text("No CSV file available.")
+                    .padding()
+            }
         }
         .fullScreenCover(isPresented: $showCameraPicker) {
             CameraCaptureView { image in
@@ -134,6 +148,12 @@ struct ContentView: View {
                 showCameraPicker = false
             }
         }
+    }
+
+    private func cleanupCSVFile() {
+        guard let csvFileURL else { return }
+        try? FileManager.default.removeItem(at: csvFileURL)
+        self.csvFileURL = nil
     }
 
     private var appBackground: some View {

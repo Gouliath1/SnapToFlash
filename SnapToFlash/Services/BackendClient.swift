@@ -109,13 +109,21 @@ struct BackendClient {
 // MARK: - Helpers
 
 extension BackendClient {
-    /// Reads BackendBaseURL{Debug|Release} based on build configuration,
-    /// then falls back to BackendBaseURL and finally 127.0.0.1.
+    /// URL selection policy:
+    /// - DEBUG + Simulator: BackendBaseURLDebug (typically local)
+    /// - DEBUG + Device: BackendBaseURLRelease (typically Fly)
+    /// - RELEASE: BackendBaseURLRelease
+    /// Then falls back to BackendBaseURL and finally 127.0.0.1.
     static func defaultBaseURL() -> URL {
+        let preferredKey: String
         #if DEBUG
-        let preferredKey = "BackendBaseURLDebug"
+        #if targetEnvironment(simulator)
+        preferredKey = "BackendBaseURLDebug"
         #else
-        let preferredKey = "BackendBaseURLRelease"
+        preferredKey = "BackendBaseURLRelease"
+        #endif
+        #else
+        preferredKey = "BackendBaseURLRelease"
         #endif
 
         if let str = Bundle.main.object(forInfoDictionaryKey: preferredKey) as? String,

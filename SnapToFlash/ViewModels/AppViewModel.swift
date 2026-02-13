@@ -156,8 +156,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    func exportCSV() -> String {
-        CSVExporter.makeCSV(from: notes)
+    func exportCSVFileURL(suggestedName: String) throws -> URL {
+        try CSVExporter.writeTempCSV(from: notes, suggestedName: suggestedName)
     }
 
     private func dedupe(_ notes: [AnkiNote]) -> [AnkiNote] {
