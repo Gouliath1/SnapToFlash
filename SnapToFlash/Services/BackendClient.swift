@@ -24,9 +24,14 @@ struct BackendClient {
         return false
     }
 
-    func analyzePage(imageData: Data, pageId: String?) async throws -> PageAnalysisResponse {
+    func analyzePage(
+        imageData: Data,
+        pageId: String?,
+        ocrPayload: VisionOCRPayload? = nil
+    ) async throws -> PageAnalysisResponse {
         var request = URLRequest(url: baseURL.appendingPathComponent("/analyze-page"))
         request.httpMethod = "POST"
+        request.timeoutInterval = BackendClient.requestTimeoutSeconds
 
         let boundary = UUID().uuidString
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -51,6 +56,21 @@ struct BackendClient {
             body.appendString("\r\n")
         }
 
+        if let ocrPayload {
+            do {
+                let encoded = try JSONEncoder().encode(ocrPayload)
+                guard let json = String(data: encoded, encoding: .utf8) else {
+                    throw BackendError.payloadEncodingFailed("OCR payload JSON is not valid UTF-8.")
+                }
+                body.appendString("--\(boundary)\r\n")
+                body.appendString("Content-Disposition: form-data; name=\"ocr_payload\"\r\n\r\n")
+                body.appendString(json)
+                body.appendString("\r\n")
+            } catch {
+                throw BackendError.payloadEncodingFailed(error.localizedDescription)
+            }
+        }
+
         body.appendString("--\(boundary)--\r\n")
         request.httpBody = body
 
@@ -73,12 +93,15 @@ struct BackendClient {
     enum BackendError: Error, LocalizedError {
         case badStatus
         case decodingFailed(Error, bodyPreview: String)
+        case payloadEncodingFailed(String)
 
         var errorDescription: String? {
             switch self {
             case .badStatus: return "Server returned an error status."
             case .decodingFailed(let err, let bodyPreview):
                 return "Unable to decode response: \(describeDecodingError(err)). Body: \(bodyPreview)"
+            case .payloadEncodingFailed(let message):
+                return "Could not encode OCR payload: \(message)"
             }
         }
 
@@ -109,6 +132,8 @@ struct BackendClient {
 // MARK: - Helpers
 
 extension BackendClient {
+    static let requestTimeoutSeconds: TimeInterval = 120
+
     /// URL selection policy:
     /// - DEBUG + Simulator: BackendBaseURLDebug (typically local)
     /// - DEBUG + Device: BackendBaseURLRelease (typically Fly)

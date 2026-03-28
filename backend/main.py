@@ -5,6 +5,7 @@ import os
 import json
 import re
 import logging
+import time
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import JSONResponse
@@ -23,6 +24,49 @@ logger.info(
     OPENAI_MODEL,
     (OPENAI_API_KEY[:8] + "...") if OPENAI_API_KEY else "None",
 )
+REVIEW_COMBINED_THRESHOLD = 0.75
+
+
+@app.middleware("http")
+async def log_http_requests(request, call_next):
+    request_id = uuid4().hex[:8]
+    start = time.perf_counter()
+    client_host = request.client.host if request.client else "unknown"
+    content_length = request.headers.get("content-length", "unknown")
+
+    logger.info(
+        "http start | id=%s | method=%s | path=%s | client=%s | content_length=%s",
+        request_id,
+        request.method,
+        request.url.path,
+        client_host,
+        content_length,
+    )
+
+    try:
+        response = await call_next(request)
+    except Exception as exc:  # noqa: BLE001
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.exception(
+            "http error | id=%s | method=%s | path=%s | duration_ms=%.1f | error=%s",
+            request_id,
+            request.method,
+            request.url.path,
+            elapsed_ms,
+            exc,
+        )
+        raise
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    logger.info(
+        "http done | id=%s | method=%s | path=%s | status=%s | duration_ms=%.1f",
+        request_id,
+        request.method,
+        request.url.path,
+        response.status_code,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.get("/health")
@@ -32,7 +76,9 @@ async def health() -> dict:
 
 @app.post("/analyze-page")
 async def analyze_page(
-    image: UploadFile = File(...), page_id: Optional[str] = Form(None)
+    image: UploadFile = File(...),
+    page_id: Optional[str] = Form(None),
+    ocr_payload: Optional[str] = Form(None),
 ) -> JSONResponse:
     """
     Receives an annotated page image, sends it to the LLM to produce Anki notes,
@@ -40,11 +86,18 @@ async def analyze_page(
     """
     image_bytes = await image.read()
     pid = page_id or image.filename or "page"
-    logger.info("analyze_page start | page_id=%s | filename=%s | image_bytes=%d", pid, image.filename, len(image_bytes))
+    parsed_ocr_payload = _parse_client_ocr_payload(ocr_payload, pid)
+    logger.info(
+        "analyze_page start | page_id=%s | filename=%s | image_bytes=%d | ocr_lines=%d",
+        pid,
+        image.filename,
+        len(image_bytes),
+        len(parsed_ocr_payload.get("lines", [])) if parsed_ocr_payload else 0,
+    )
 
     try:
         if client:
-            payload = await generate_notes_with_llm(image_bytes, pid)
+            payload = await generate_notes_with_llm(image_bytes, pid, parsed_ocr_payload)
         else:
             payload = stub_payload(pid, warning="OPENAI_API_KEY not set; using stub.")
     except Exception as exc:  # noqa: BLE001
@@ -66,7 +119,11 @@ async def analyze_page(
 # Helpers
 # ------------------------
 
-async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str, Any]:
+async def generate_notes_with_llm(
+    image_bytes: bytes,
+    page_id: str,
+    ocr_payload: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Call OpenAI multimodal model to extract flashcards.
     """
@@ -77,17 +134,22 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
     logger.info("llm request | page_id=%s | encoded_image_chars=%d", page_id, len(image_b64))
 
     system_prompt = (
-        "You are an assistant that extracts study flashcards from photos and prepares them for user validation before Anki export. "
-        "Inputs can include: (a) a printed book page with highlights/underlines, (b) a handwritten notebook with vocab lines "
-        "kanji→hiragana→translation/comment (phrases allowed). Goal: map notebook entries to the closest matching word/phrase on the book page. "
-        "If no translation exists, use the highlighted book text itself. "
-        "Order the anki_notes array in reading order from this single image: top-to-bottom, and left-to-right for ties. "
-        "Follow the rules and output only valid JSON matching the provided schema."
+        "You extract Japanese study flashcards from one page image and return strict JSON only. "
+        "When on-device OCR payload is provided, treat it as primary evidence. "
+        "Use image reading only to recover missing or ambiguous OCR parts. "
+        "Do not invent text that is not supported by OCR or image evidence. "
+        "Preserve reading order (top-to-bottom, left-to-right)."
     )
 
+    ocr_context = _build_ocr_context(ocr_payload)
     user_text = (
-        "Analyze this page and return a JSON object that follows the schema named PageAnalysis. "
-        "Combine all detected cards into anki_notes (max 40), already sorted by reading order (top-to-bottom, left-to-right)."
+        "Analyze this page and return a JSON object that follows schema PageAnalysis.\n"
+        "Return every valid flashcard detected on this page (no arbitrary count cap).\n"
+        "Scoring rubric per card:\n"
+        "- conf_ocr: confidence the surface text was read correctly (0.0 to 1.0).\n"
+        "- conf_match: confidence the mapped meaning/translation/match is correct (0.0 to 1.0), and it must not exceed conf_ocr.\n"
+        "- warnings: include only concrete uncertainty reasons (ambiguous handwriting, conflicting readings, missing translation).\n\n"
+        f"{ocr_context}"
     )
 
     try:
@@ -100,8 +162,7 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
                     "additionalProperties": False,
                     "properties": {
                         "page_id": {"type": "string"},
-                        "confidence": {"type": "number"},
-                        "needs_review": {"type": "boolean"},
+                        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                         "warnings": {"type": "array", "items": {"type": "string"}},
                         "anki_notes": {
                             "type": "array",
@@ -118,9 +179,8 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
                                     "book_match": {"type": "string"},
                                     "hand_translation": {"type": "string"},
                                     "ai_translation": {"type": "string"},
-                                    "needs_review": {"type": "boolean"},
-                                    "conf_ocr": {"type": "number"},
-                                    "conf_match": {"type": "number"},
+                                    "conf_ocr": {"type": "number", "minimum": 0, "maximum": 1},
+                                    "conf_match": {"type": "number", "minimum": 0, "maximum": 1},
                                     "notes": {"type": "string"},
                                 },
                                 "required": [
@@ -133,7 +193,6 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
                                     "book_match",
                                     "hand_translation",
                                     "ai_translation",
-                                    "needs_review",
                                     "conf_ocr",
                                     "conf_match",
                                     "notes",
@@ -141,7 +200,7 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
                             },
                         },
                     },
-                    "required": ["page_id", "confidence", "needs_review", "warnings", "anki_notes"],
+                    "required": ["page_id", "confidence", "warnings", "anki_notes"],
                 },
                 "strict": True,
             },
@@ -162,6 +221,7 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
             temperature=0,
             max_tokens=2000,
             response_format=schema,
+            timeout=90,
         )
         content = response.choices[0].message.content
 
@@ -176,9 +236,21 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
         logger.exception("llm request failed | page_id=%s | error=%s", page_id, exc)
         raise HTTPException(status_code=502, detail=f"LLM error: {exc}") from exc
 
-    # Normalize output and fill defaults to match app expectations
+    # Normalize output and fill defaults to match app expectations.
+    # Review flag is derived server-side from combined confidence to keep semantics deterministic.
     anki_notes = []
+    warnings = _normalize_warnings(parsed.get("warnings", []))
+    normalized_match_over_ocr_count = 0
+
     for note in parsed.get("anki_notes", []):
+        raw_conf_ocr = _clamp01(_safe_float(note.get("conf_ocr"), default=0.5))
+        raw_conf_match = _clamp01(_safe_float(note.get("conf_match"), default=0.5))
+        if raw_conf_match > raw_conf_ocr:
+            normalized_match_over_ocr_count += 1
+        conf_match = min(raw_conf_match, raw_conf_ocr)
+        combined_conf = min(raw_conf_ocr, conf_match)
+        note_needs_review = combined_conf < REVIEW_COMBINED_THRESHOLD
+
         anki_notes.append(
             {
                 "id": note.get("id") or str(uuid4()),
@@ -190,20 +262,30 @@ async def generate_notes_with_llm(image_bytes: bytes, page_id: str) -> Dict[str,
                 "book_match": note.get("book_match", ""),
                 "hand_translation": note.get("hand_translation", ""),
                 "ai_translation": note.get("ai_translation", ""),
-                "needs_review": bool(note.get("needs_review", False)),
-                "conf_ocr": float(note.get("conf_ocr", 0.5)),
-                "conf_match": float(note.get("conf_match", 0.5)),
+                "needs_review": note_needs_review,
+                "conf_ocr": raw_conf_ocr,
+                "conf_match": conf_match,
                 "notes": note.get("notes", ""),
             }
         )
 
+    if normalized_match_over_ocr_count > 0:
+        warnings.append(
+            f"Normalized conf_match to be <= conf_ocr on {normalized_match_over_ocr_count} card(s)."
+        )
+    warnings = _dedupe_strings(warnings)
+
+    final_notes = anki_notes or stub_payload(page_id)["anki_notes"]
+    page_confidence = sum(min(note["conf_ocr"], note["conf_match"]) for note in final_notes) / len(final_notes)
+    page_needs_review = any(note["needs_review"] for note in final_notes)
+
     payload = {
         "page_id": parsed.get("page_id", page_id),
-        "confidence": float(parsed.get("confidence", 0.7)),
-        "needs_review": bool(parsed.get("needs_review", False)),
-        "warnings": parsed.get("warnings", []),
+        "confidence": page_confidence,
+        "needs_review": page_needs_review,
+        "warnings": warnings,
         "annotations": [],
-        "anki_notes": anki_notes or stub_payload(page_id)["anki_notes"],
+        "anki_notes": final_notes,
     }
     return payload
 
@@ -254,3 +336,90 @@ def _safe_json_loads(content: str) -> Dict[str, Any]:
                 pass
         logger.error("json decode failed hard | raw_starts=%s", (content or "")[:200])
         raise HTTPException(status_code=502, detail=f"LLM JSON decode error; raw starts: {content[:200]}")
+
+
+def _parse_client_ocr_payload(raw_payload: Optional[str], page_id: str) -> Optional[Dict[str, Any]]:
+    if not raw_payload:
+        return None
+
+    try:
+        parsed = json.loads(raw_payload)
+        if isinstance(parsed, dict) is False:
+            logger.warning("ocr payload is not an object | page_id=%s", page_id)
+            return None
+        return parsed
+    except json.JSONDecodeError:
+        logger.warning("ocr payload json decode failed | page_id=%s", page_id)
+        return None
+
+
+def _build_ocr_context(ocr_payload: Optional[Dict[str, Any]]) -> str:
+    if not ocr_payload:
+        return "On-device OCR payload: not provided."
+
+    lines = ocr_payload.get("lines", [])
+    if isinstance(lines, list) is False:
+        lines = []
+
+    selected_variant = str(ocr_payload.get("selectedVariant", "unknown"))
+    aggregate_conf = _safe_float(ocr_payload.get("aggregateConfidence"), default=0.0)
+    quality_score = _safe_float(ocr_payload.get("qualityScore"), default=0.0)
+    language_code = str(ocr_payload.get("languageCode", "unknown"))
+
+    rendered_lines: List[str] = []
+    for idx, item in enumerate(lines[:120]):
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        text = re.sub(r"\s+", " ", text)
+        line_conf = _safe_float(item.get("confidence"), default=0.0)
+        rendered_lines.append(f"{idx + 1:03d}. [{line_conf:.2f}] {text[:220]}")
+
+    if not rendered_lines:
+        rendered_lines.append("(no OCR lines)")
+
+    return (
+        "On-device OCR payload summary:\n"
+        f"- variant: {selected_variant}\n"
+        f"- language: {language_code}\n"
+        f"- aggregate_confidence: {aggregate_conf:.2f}\n"
+        f"- quality_score: {quality_score:.2f}\n"
+        "- lines (reading order):\n"
+        + "\n".join(rendered_lines)
+    )
+
+
+def _safe_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _normalize_warnings(raw_warnings: Any) -> List[str]:
+    if isinstance(raw_warnings, list) is False:
+        return []
+
+    out: List[str] = []
+    for item in raw_warnings:
+        text = str(item).strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _dedupe_strings(values: List[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        out.append(value)
+    return out

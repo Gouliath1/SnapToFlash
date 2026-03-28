@@ -6,21 +6,23 @@ import Combine
 
 struct ContentView: View {
     @EnvironmentObject private var model: AppViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var pickerItems: [PhotosPickerItem] = []
     @State private var deckName: String = "Deckify"
-    @State private var showCSVShare = false
-    @State private var csvFileURL: URL?
+    @State private var showExportShare = false
+    @State private var exportFileURL: URL?
     @State private var showCameraPicker = false
     @State private var showLoadOptions = false
     @State private var showValidationOptions = false
     @State private var showPhotoLibraryPicker = false
     @State private var showExportOptions = false
-    @State private var shouldPresentCSVAfterExportSheet = false
+    @State private var shouldPresentShareAfterExportSheet = false
 
     private let actionBarHeight: CGFloat = 120
     private let brandBlue = Color(red: 0.16, green: 0.59, blue: 0.95)
     private let brandTeal = Color(red: 0.13, green: 0.73, blue: 0.69)
     private let brandSun = Color(red: 1.00, green: 0.64, blue: 0.18)
+    private var isDarkMode: Bool { colorScheme == .dark }
 
     var body: some View {
         NavigationStack {
@@ -47,10 +49,7 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        backendStatus
-                        ankiStatus
-                    }
+                    backendStatus
                 }
             }
         }
@@ -58,7 +57,7 @@ struct ContentView: View {
             actionBar
         }
         .task {
-            await model.refreshServiceAvailability()
+            await model.refreshBackendAvailability()
         }
         .onChange(of: pickerItems) { _, newItems in
             model.addPhotos(newItems)
@@ -109,34 +108,45 @@ struct ContentView: View {
         .sheet(
             isPresented: $showExportOptions,
             onDismiss: {
-                if shouldPresentCSVAfterExportSheet {
-                    shouldPresentCSVAfterExportSheet = false
-                    showCSVShare = true
+                if shouldPresentShareAfterExportSheet {
+                    shouldPresentShareAfterExportSheet = false
+                    showExportShare = true
                 }
             }
         ) {
             ExportOptionsSheet(
-                ankiEnabled: canAnkiExport,
+                ankiEnabled: canExport,
                 csvEnabled: canExport
             ) {
-                showExportOptions = false
-                Task { await model.sendToAnki(deckName: deckName) }
-            } onCSV: {
                 do {
-                    csvFileURL = try model.exportCSVFileURL(suggestedName: deckName)
-                    shouldPresentCSVAfterExportSheet = true
+                    exportFileURL = try model.exportAnkiImportFileURL(
+                        suggestedName: deckName,
+                        deckName: deckName
+                    )
+                    shouldPresentShareAfterExportSheet = true
+                    model.statusText = "Anki import file ready."
                 } catch {
                     model.errorMessage = error.localizedDescription
-                    shouldPresentCSVAfterExportSheet = false
+                    shouldPresentShareAfterExportSheet = false
+                }
+                showExportOptions = false
+            } onCSV: {
+                do {
+                    exportFileURL = try model.exportCSVFileURL(suggestedName: deckName)
+                    shouldPresentShareAfterExportSheet = true
+                    model.statusText = "CSV export ready."
+                } catch {
+                    model.errorMessage = error.localizedDescription
+                    shouldPresentShareAfterExportSheet = false
                 }
                 showExportOptions = false
             }
         }
-        .sheet(isPresented: $showCSVShare, onDismiss: cleanupCSVFile) {
-            if let csvFileURL {
-                ShareSheet(activityItems: [csvFileURL])
+        .sheet(isPresented: $showExportShare, onDismiss: cleanupExportFile) {
+            if let exportFileURL {
+                ShareSheet(activityItems: [exportFileURL])
             } else {
-                Text("No CSV file available.")
+                Text("No export file available.")
                     .padding()
             }
         }
@@ -150,32 +160,38 @@ struct ContentView: View {
         }
     }
 
-    private func cleanupCSVFile() {
-        guard let csvFileURL else { return }
-        try? FileManager.default.removeItem(at: csvFileURL)
-        self.csvFileURL = nil
+    private func cleanupExportFile() {
+        guard let exportFileURL else { return }
+        try? FileManager.default.removeItem(at: exportFileURL)
+        self.exportFileURL = nil
     }
 
     private var appBackground: some View {
         ZStack {
             LinearGradient(
-                colors: [
-                    Color(red: 0.98, green: 0.99, blue: 1.00),
-                    Color(red: 0.95, green: 0.98, blue: 1.00),
-                    Color(red: 0.95, green: 0.99, blue: 0.98)
-                ],
+                colors: isDarkMode
+                    ? [
+                        Color(red: 0.06, green: 0.08, blue: 0.12),
+                        Color(red: 0.07, green: 0.11, blue: 0.16),
+                        Color(red: 0.05, green: 0.10, blue: 0.13)
+                    ]
+                    : [
+                        Color(red: 0.98, green: 0.99, blue: 1.00),
+                        Color(red: 0.95, green: 0.98, blue: 1.00),
+                        Color(red: 0.95, green: 0.99, blue: 0.98)
+                    ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
             .ignoresSafeArea()
 
             Circle()
-                .fill(brandBlue.opacity(0.15))
+                .fill(brandBlue.opacity(isDarkMode ? 0.26 : 0.15))
                 .frame(width: 260, height: 260)
                 .offset(x: -150, y: -320)
 
             Circle()
-                .fill(brandSun.opacity(0.13))
+                .fill(brandSun.opacity(isDarkMode ? 0.19 : 0.13))
                 .frame(width: 230, height: 230)
                 .offset(x: 170, y: -250)
         }
@@ -188,9 +204,9 @@ struct ContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
-                        .stroke(Color.white.opacity(0.32), lineWidth: 1)
+                        .stroke(Color.white.opacity(isDarkMode ? 0.18 : 0.32), lineWidth: 1)
                 )
-                .shadow(color: brandBlue.opacity(0.30), radius: 14, y: 8)
+                .shadow(color: brandBlue.opacity(isDarkMode ? 0.38 : 0.30), radius: 14, y: 8)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text("Deckify")
@@ -215,18 +231,14 @@ struct ContentView: View {
                 Text("1) Capture or import annotated pages")
                     .font(.headline)
 
+                ocrModeSection
+
                 if model.pages.isNotEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(model.pages) { page in
                                 ZStack(alignment: .topTrailing) {
-                                    Image(uiImage: page.image)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 140, height: 180)
-                                        .clipped()
-                                        .cornerRadius(10)
-                                        .shadow(radius: 2)
+                                    pagePreview(for: page)
                                     Button(role: .destructive) {
                                         model.removePage(page)
                                     } label: {
@@ -244,6 +256,81 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                 }
             }
+        }
+    }
+
+    private var ocrModeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Text extraction mode")
+                    .font(.subheadline.bold())
+                Spacer()
+                Text(model.ocrProcessingMode.badgeTitle)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(brandBlue)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(brandBlue.opacity(colorScheme == .dark ? 0.22 : 0.10))
+                    )
+            }
+
+            if model.availableOCRProcessingModes.count > 1 {
+                Picker("Text extraction mode", selection: ocrModeBinding) {
+                    ForEach(model.availableOCRProcessingModes) { mode in
+                        Text(mode.title)
+                            .tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(model.isAnalyzing)
+            }
+
+            Text(model.ocrProcessingDescription)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.black.opacity(colorScheme == .dark ? 0.16 : 0.04))
+        )
+    }
+
+    @ViewBuilder
+    private func pagePreview(for page: PageInput) -> some View {
+        if let preprocessed = page.preprocessedImage {
+            HStack(spacing: 8) {
+                previewTile(image: page.image, label: "Original")
+                previewTile(image: preprocessed, label: "Processed")
+            }
+            .padding(6)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.black.opacity(colorScheme == .dark ? 0.18 : 0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.30), lineWidth: 1)
+            )
+            .shadow(radius: 2)
+        } else {
+            previewTile(image: page.image, label: "Original")
+        }
+    }
+
+    private func previewTile(image: UIImage, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 132, height: 170)
+                .clipped()
+                .cornerRadius(10)
+            Text(label)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -276,14 +363,50 @@ struct ContentView: View {
                         }
                     }
                 }
+
+#if DEBUG
+                if model.ocrDebugByPage.isEmpty == false {
+                    ocrPreviewSection
+                }
+#endif
             }
         }
     }
 
+#if DEBUG
+    private var ocrPreviewSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("OCR preview (dev)")
+                .font(.subheadline.bold())
+            ForEach(model.pages) { page in
+                if let preview = model.ocrDebugByPage[page.id] {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(page.filename)
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                        ScrollView(.vertical) {
+                            Text(preview)
+                                .font(.system(.caption2, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 120)
+                    }
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.black.opacity(colorScheme == .dark ? 0.20 : 0.06))
+                    )
+                }
+            }
+        }
+    }
+#endif
+
     private var resultsSection: some View {
         sectionCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("2) Review & send to Anki")
+                Text("2) Review & export cards")
                     .font(.headline)
 
                 if model.notes.isEmpty {
@@ -291,22 +414,21 @@ struct ContentView: View {
                         Text("Cards will appear here after analysis.")
                             .foregroundColor(.secondary)
                     } else {
-                        Text("Review pending cards below. Only approved cards are sent to Anki.")
+                        Text("Review pending cards below. Only approved cards are included in export files.")
                             .foregroundColor(.secondary)
                     }
                 } else {
+                    visionOCRSummary(for: model.notes)
                     ForEach(Array(model.notes.enumerated()), id: \.element.id) { index, note in
                         CardRow(note: note, cardIndex: index + 1, showValidation: false, onApprove: {}, onReject: {})
                     }
 
-                    if model.ankiAvailable {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Anki deck name")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            TextField("Deck name", text: $deckName)
-                                .textFieldStyle(.roundedBorder)
-                        }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Anki deck name")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        TextField("Deck name", text: $deckName)
+                            .textFieldStyle(.roundedBorder)
                     }
                 }
 
@@ -314,6 +436,7 @@ struct ContentView: View {
                     Divider().padding(.vertical, 8)
                     Text("Pending validation")
                         .font(.subheadline.bold())
+                    visionOCRSummary(for: model.pendingNotes)
                     ForEach(Array(model.pendingNotes.enumerated()), id: \.element.id) { index, note in
                         CardRow(note: note, cardIndex: index + 1, showValidation: true) {
                             model.validate(note: note)
@@ -380,7 +503,7 @@ struct ContentView: View {
         .padding(.top, 8)
         .padding(.bottom, 10)
         .background(.ultraThinMaterial)
-        .shadow(color: Color.black.opacity(0.12), radius: 10, y: -4)
+        .shadow(color: Color.black.opacity(isDarkMode ? 0.28 : 0.12), radius: 10, y: -4)
         .overlay(alignment: .top) {
             Divider()
         }
@@ -393,20 +516,81 @@ struct ContentView: View {
             .padding(14)
             .background(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.white.opacity(0.80))
+                    .fill(
+                        isDarkMode
+                            ? Color(red: 0.14, green: 0.17, blue: 0.22).opacity(0.88)
+                            : Color.white.opacity(0.80)
+                    )
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(
                         LinearGradient(
-                            colors: [brandBlue.opacity(0.22), brandTeal.opacity(0.20), brandSun.opacity(0.20)],
+                            colors: isDarkMode
+                                ? [brandBlue.opacity(0.46), brandTeal.opacity(0.38), brandSun.opacity(0.30)]
+                                : [brandBlue.opacity(0.22), brandTeal.opacity(0.20), brandSun.opacity(0.20)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
                         lineWidth: 1
                     )
             )
-            .shadow(color: brandBlue.opacity(0.08), radius: 14, y: 8)
+            .shadow(color: brandBlue.opacity(isDarkMode ? 0.20 : 0.08), radius: 14, y: 8)
+    }
+
+    @ViewBuilder
+    private func visionOCRSummary(for notes: [AnkiNote]) -> some View {
+        let rows = visionOCRRows(from: notes)
+        if rows.isNotEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("On-device Vision OCR")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.secondary)
+                ForEach(rows, id: \.page) { row in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(scoreTone(for: row.quality))
+                            .frame(width: 8, height: 8)
+                        Text("\(row.page): \(Int((row.quality * 100).rounded()))%")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func visionOCRRows(from notes: [AnkiNote]) -> [(page: String, quality: Double)] {
+        var byPage: [String: Double] = [:]
+        for note in notes {
+            guard let quality = note.visionOCRQuality else { continue }
+            let rawPages = (note.sourcePage ?? "")
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { $0.isEmpty == false }
+
+            let pages = rawPages.isEmpty ? ["Unknown page"] : rawPages
+            for page in pages {
+                byPage[page] = max(byPage[page] ?? 0, quality)
+            }
+        }
+        return byPage.keys.sorted().map { page in
+            (page: page, quality: byPage[page] ?? 0)
+        }
+    }
+
+    private func scoreTone(for value: Double?) -> Color {
+        guard let value else { return .gray }
+        if value < 0.45 { return .red }
+        if value < 0.75 { return .orange }
+        return .green
+    }
+
+    private var ocrModeBinding: Binding<OCRProcessingMode> {
+        Binding(
+            get: { model.ocrProcessingMode },
+            set: { model.setOCRProcessingMode($0) }
+        )
     }
 
     private var canLoadImages: Bool {
@@ -423,20 +607,6 @@ struct ContentView: View {
 
     private var canExport: Bool {
         model.isAnalyzing == false && model.notes.isNotEmpty
-    }
-
-    private var canAnkiExport: Bool {
-        canExport && model.ankiAvailable
-    }
-
-    private var ankiStatus: some View {
-        StatusPill(
-            title: "Anki",
-            systemImage: "paperplane.fill",
-            isOnline: model.ankiAvailable,
-            accent: Color.orange
-        )
-        .onTapGesture { Task { await model.refreshAnkiAvailability() } }
     }
 
     private var backendStatus: some View {
@@ -589,6 +759,7 @@ private enum DeckifyBrandImageLoader {
 }
 
 private struct CardRow: View {
+    @Environment(\.colorScheme) private var colorScheme
     let note: AnkiNote
     let cardIndex: Int
     var showValidation: Bool
@@ -611,13 +782,6 @@ private struct CardRow: View {
                     }
                 }
                 Spacer()
-                if note.needsReview {
-                    Text("Needs review")
-                        .font(.caption2)
-                        .padding(6)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.15)))
-                        .foregroundColor(.orange)
-                }
             }
 
             if let book = note.bookMatch, !book.isEmpty {
@@ -650,18 +814,7 @@ private struct CardRow: View {
                     .foregroundColor(.secondary)
             }
 
-            HStack {
-                if let conf = note.confMatch {
-                    ProgressView(value: conf)
-                        .tint(note.needsReview ? .orange : .green)
-                        .frame(maxWidth: 120)
-                }
-                if let ocr = note.confOcr {
-                    Text(String(format: "OCR %.0f%%", ocr * 100))
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
+            simpleCardIndicators
 
             if showValidation {
                 HStack {
@@ -676,16 +829,71 @@ private struct CardRow: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.white.opacity(0.74))
+                .fill(
+                    colorScheme == .dark
+                        ? Color(red: 0.17, green: 0.20, blue: 0.25).opacity(0.92)
+                        : Color.white.opacity(0.74)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.black.opacity(0.05), lineWidth: 1)
+                .stroke(
+                    colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.05),
+                    lineWidth: 1
+                )
         )
+    }
+
+    private var simpleCardIndicators: some View {
+        combinedConfidencePill
+        .padding(.vertical, 2)
+    }
+
+    private var combinedConfidencePill: some View {
+        let value = combinedConfidence
+        let tone = scoreTone(for: value)
+        let text: String
+        if let value {
+            text = "Confidence \(Int((value * 100).rounded()))%"
+        } else {
+            text = "Confidence n/a"
+        }
+
+        return Text(text)
+            .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(tone.opacity(colorScheme == .dark ? 0.30 : 0.14))
+            )
+            .foregroundColor(tone)
+    }
+
+    private var combinedConfidence: Double? {
+        switch (note.confOcr, note.confMatch) {
+        case let (ocr?, match?):
+            return min(ocr, match)
+        case let (ocr?, nil):
+            return ocr
+        case let (nil, match?):
+            return match
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    private func scoreTone(for value: Double?) -> Color {
+        guard let value else { return .gray }
+        if value < 0.45 { return .red }
+        if value < 0.75 { return .orange }
+        return .green
     }
 }
 
 private struct ActionBarButtonLabel: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let subtitle: String
     let systemImage: String
@@ -693,12 +901,13 @@ private struct ActionBarButtonLabel: View {
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
-        let activeTop = Color(red: 0.76, green: 0.90, blue: 1.00)
-        let activeBottom = Color(red: 0.74, green: 0.91, blue: 0.90)
-        let activeStroke = Color(red: 0.34, green: 0.65, blue: 0.88)
-        let disabledTop = Color(red: 0.81, green: 0.86, blue: 0.92)
-        let disabledBottom = Color(red: 0.77, green: 0.82, blue: 0.89)
-        let disabledStroke = Color(red: 0.66, green: 0.72, blue: 0.80)
+        let isDarkMode = colorScheme == .dark
+        let activeTop = isDarkMode ? Color(red: 0.19, green: 0.30, blue: 0.45) : Color(red: 0.76, green: 0.90, blue: 1.00)
+        let activeBottom = isDarkMode ? Color(red: 0.13, green: 0.24, blue: 0.35) : Color(red: 0.74, green: 0.91, blue: 0.90)
+        let activeStroke = isDarkMode ? Color(red: 0.52, green: 0.74, blue: 0.94) : Color(red: 0.34, green: 0.65, blue: 0.88)
+        let disabledTop = isDarkMode ? Color(red: 0.20, green: 0.23, blue: 0.29) : Color(red: 0.81, green: 0.86, blue: 0.92)
+        let disabledBottom = isDarkMode ? Color(red: 0.15, green: 0.18, blue: 0.24) : Color(red: 0.77, green: 0.82, blue: 0.89)
+        let disabledStroke = isDarkMode ? Color(red: 0.38, green: 0.44, blue: 0.53) : Color(red: 0.66, green: 0.72, blue: 0.80)
 
         VStack(spacing: 1) {
             Image(systemName: systemImage)
@@ -715,8 +924,8 @@ private struct ActionBarButtonLabel: View {
         .padding(.vertical, 8)
         .foregroundColor(
             isEnabled
-                ? Color(red: 0.07, green: 0.27, blue: 0.46)
-                : Color(red: 0.37, green: 0.44, blue: 0.54)
+                ? (isDarkMode ? Color(red: 0.88, green: 0.94, blue: 1.00) : Color(red: 0.07, green: 0.27, blue: 0.46))
+                : (isDarkMode ? Color(red: 0.70, green: 0.76, blue: 0.85) : Color(red: 0.37, green: 0.44, blue: 0.54))
         )
         .background { shape.fill(.ultraThinMaterial) }
         .overlay {
@@ -733,7 +942,9 @@ private struct ActionBarButtonLabel: View {
             shape
                 .fill(
                     LinearGradient(
-                        colors: [Color.white.opacity(0.62), Color.white.opacity(0.08), .clear],
+                        colors: isDarkMode
+                            ? [Color.white.opacity(0.22), Color.white.opacity(0.06), .clear]
+                            : [Color.white.opacity(0.62), Color.white.opacity(0.08), .clear],
                         startPoint: .top,
                         endPoint: .bottom
                     )
@@ -749,7 +960,7 @@ private struct ActionBarButtonLabel: View {
                     lineWidth: 1
                 )
         )
-        .shadow(color: Color.black.opacity(isEnabled ? 0.07 : 0.04), radius: 8, y: 4)
+        .shadow(color: Color.black.opacity(isDarkMode ? (isEnabled ? 0.30 : 0.16) : (isEnabled ? 0.07 : 0.04)), radius: 8, y: 4)
     }
 }
 
@@ -839,14 +1050,14 @@ private struct ExportOptionsSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Export cards")
                 .font(.headline)
-            Text("Choose export destination")
+            Text("Choose export format")
                 .font(.footnote)
                 .foregroundColor(.secondary)
 
             Button {
                 onAnki()
             } label: {
-                Label("Anki", systemImage: "paperplane.fill")
+                Label("Anki Import File", systemImage: "square.and.arrow.up.fill")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.borderedProminent)

@@ -14,6 +14,8 @@ struct AnkiNote: Identifiable, Codable, Hashable {
     var bookMatch: String?
     var confMatch: Double?
     var confOcr: Double?
+    var visionOCRQuality: Double?
+    var visionOCRVariant: String?
 
     init(
         id: UUID = UUID(),
@@ -28,7 +30,9 @@ struct AnkiNote: Identifiable, Codable, Hashable {
         aiTranslation: String? = nil,
         bookMatch: String? = nil,
         confMatch: Double? = nil,
-        confOcr: Double? = nil
+        confOcr: Double? = nil,
+        visionOCRQuality: Double? = nil,
+        visionOCRVariant: String? = nil
     ) {
         self.id = id
         self.expressionOrWord = expressionOrWord
@@ -43,5 +47,7 @@ struct AnkiNote: Identifiable, Codable, Hashable {
         self.bookMatch = bookMatch
         self.confMatch = confMatch
         self.confOcr = confOcr
+        self.visionOCRQuality = visionOCRQuality
+        self.visionOCRVariant = visionOCRVariant
     }
 }

@@ -6,7 +6,7 @@
 **Non-goals:**
 - No complex, classical CV pipelines (use GenAI vision-first extraction for MVP).
 - No multi-page document management, account system, or advanced study analytics.
-- No advanced editor workflow (inline card edits are allowed, but no full rich-text editing UI).
+- No advanced editor workflow beyond confirm/edit/delete for low-confidence cards; no full rich-text editing UI.
 
 ## User flow (minimal screens and actions)
 1. **Import/Scan**: User takes one or more photos or imports multiple images of Japanese textbook pages with annotations.
@@ -121,6 +121,7 @@ Example JSON:
 }
 ```
 
+<<<<<<< ours
 ## Vision prompt (notebook + highlighted book pages)
 Use this prompt verbatim for the multimodal call that extracts flashcards from mixed notebook + textbook photos and prepares them for user validation.
 
@@ -179,6 +180,8 @@ Post-processing expectations (handled downstream):
 - During review, if the handwritten translation/comment and the model translation differ, surface both and let the user choose; otherwise skip the diff step to keep flow fast.
 - The Anki deck is created only after user validation (per-card or bulk accept). Unapproved cards are excluded from the export.
 
+=======
+>>>>>>> theirs
 ## Image preprocessing recommendations
 - Resize to max long edge 1600–2048 px.
 - Compress to JPEG quality ~0.7–0.85.
@@ -208,6 +211,7 @@ ExpressionOrWord,Reading,Meaning,Example
 - Default to no data retention; cache by image hash only if user consents or in on-device cache.
 - Log only minimal metadata (timestamp, success/failure) in proxy option.
 
+<<<<<<< ours
 ## UX v2 requirements (next iteration)
 These items are approved for the next implementation pass.
 
@@ -270,6 +274,8 @@ These items are approved for the next implementation pass.
 - Card list is visually compact and still readable.
 - Edited cards can request AI translation suggestions before final approval/export.
 
+=======
+>>>>>>> theirs
 ## Acceptance criteria (end-to-end)
 - User can go from photo → Anki add in **2–3 taps**.
 - User can ingest multiple screenshots and generate a single combined set of new words.

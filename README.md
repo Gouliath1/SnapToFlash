@@ -46,5 +46,8 @@ scripts/run_backend.sh --no-configure-app local  # do not modify Info.plist
 - App URL resolution order:
   - DEBUG build: `BackendBaseURLDebug` -> `BackendBaseURL` -> `http://127.0.0.1:8787`
   - RELEASE build: `BackendBaseURLRelease` -> `BackendBaseURL` -> `http://127.0.0.1:8787`
+- Export options:
+  - `Anki Import File`: generates a `.txt` import file for Anki Desktop/AnkiMobile.
+  - `CSV`: standard comma-separated export for manual workflows.
 - `.env` is ignored by git; use `.env.example` as a template.
 - The backend falls back to a stub response if the API key is missing or the LLM call fails.

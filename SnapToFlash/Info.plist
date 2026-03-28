@@ -34,5 +34,7 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>VisionOCREnabled</key>
+	<true/>
 </dict>
 </plist>
